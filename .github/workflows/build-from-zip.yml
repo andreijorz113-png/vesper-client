@@ -1,0 +1,62 @@
+name: build-from-zip
+on:
+  workflow_dispatch:
+    inputs:
+      fabric_version:
+        description: 'Override Fabric API version (optional)'
+        required: false
+        default: ''
+      loom_version:
+        description: 'Override Loom version (optional)'
+        required: false
+        default: ''
+  push:
+    paths: ['vesper-client.zip']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip project
+        run: |
+          unzip -q vesper-client.zip -d project
+          ls project/vesper
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.2.0'
+
+      - name: Build jar
+        working-directory: project/vesper
+        env:
+          FABRIC_V: ${{ inputs.fabric_version }}
+          LOOM_V: ${{ inputs.loom_version }}
+        run: |
+          ARGS=""
+          if [ -n "$FABRIC_V" ]; then ARGS="$ARGS -Pfabric_version=$FABRIC_V"; fi
+          if [ -n "$LOOM_V" ]; then ARGS="$ARGS -Ploom_version=$LOOM_V"; fi
+          gradle build --stacktrace $ARGS
+
+      - name: Publish jar as a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          JAR=$(ls project/vesper/build/libs/*.jar | grep -v sources | head -n1)
+          gh release create "build-${{ github.run_number }}" "$JAR" \
+            --title "Vesper build ${{ github.run_number }}" \
+            --notes "Built from vesper-client.zip"
+
+      - name: Unit tests
+        if: always()
+        working-directory: project/vesper
+        run: gradle coreTests --stacktrace
